@@ -1,0 +1,3 @@
+[submodule "postgres-with-age-pgvector"]
+	path = postgres-with-age-pgvector
+	url = https://github.com/cromulus/postgres-with-age-pgvector.git

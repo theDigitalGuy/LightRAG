@@ -13,28 +13,38 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-  neo4j:
-    image: neo4j:5.26.4-community
-    container_name: lightrag-server_neo4j-community
+  
+  postgres:
+    build:
+      context: ./postgres-with-age-pgvector
+      dockerfile: Dockerfile
+    container_name: postgres-rag
     restart: always
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
-      - NEO4J_apoc_export_file_enabled=true
-      - NEO4J_server_bolt_listen__address=0.0.0.0:7687
-      - NEO4J_server_bolt_advertised__address=neo4j:7687
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DATABASE}
     volumes:
-      - ./neo4j/plugins:/var/lib/neo4j/plugins
-      - lightrag_neo4j_import:/var/lib/neo4j/import
-      - lightrag_neo4j_data:/data
-      - lightrag_neo4j_backups:/backups
+      - postgres_data:/var/lib/postgresql/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin4
+    ports:
+      - "${PGADMIN_PORT:-5422}:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
 volumes:
-  lightrag_neo4j_import:
-  lightrag_neo4j_data:
-  lightrag_neo4j_backups:
+  postgres_data:
+  pgadmin_data:
