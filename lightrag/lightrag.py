@@ -20,6 +20,11 @@ from typing import (
     List,
     Dict,
 )
+from lightrag.constants import (
+    DEFAULT_MAX_TOKEN_SUMMARY,
+    DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
+)
+from lightrag.utils import get_env_value
 
 from lightrag.kg import (
     STORAGES,
@@ -48,11 +53,10 @@ from .operate import (
     extract_entities,
     merge_nodes_and_edges,
     kg_query,
-    mix_kg_vector_query,
     naive_query,
     query_with_keywords,
 )
-from .prompt import GRAPH_FIELD_SEP, PROMPTS
+from .prompt import GRAPH_FIELD_SEP
 from .utils import (
     Tokenizer,
     TiktokenTokenizer,
@@ -119,10 +123,14 @@ class LightRAG:
     entity_extract_max_gleaning: int = field(default=1)
     """Maximum number of entity extraction attempts for ambiguous content."""
 
-    summary_to_max_tokens: int = field(default=int(os.getenv("MAX_TOKEN_SUMMARY", 500)))
+    summary_to_max_tokens: int = field(
+        default=get_env_value("MAX_TOKEN_SUMMARY", DEFAULT_MAX_TOKEN_SUMMARY, int)
+    )
 
     force_llm_summary_on_merge: int = field(
-        default=int(os.getenv("FORCE_LLM_SUMMARY_ON_MERGE", 6))
+        default=get_env_value(
+            "FORCE_LLM_SUMMARY_ON_MERGE", DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int
+        )
     )
 
     # Text chunking
@@ -245,7 +253,7 @@ class LightRAG:
 
     addon_params: dict[str, Any] = field(
         default_factory=lambda: {
-            "language": os.getenv("SUMMARY_LANGUAGE", PROMPTS["DEFAULT_LANGUAGE"])
+            "language": get_env_value("SUMMARY_LANGUAGE", "English", str)
         }
     )
 
@@ -381,6 +389,8 @@ class LightRAG:
             ),
             embedding_func=self.embedding_func,
         )
+
+        # TODO: deprecating, text_chunks is redundant with chunks_vdb
         self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=make_namespace(
                 self.namespace_prefix, NameSpace.KV_STORE_TEXT_CHUNKS
@@ -1426,8 +1436,10 @@ class LightRAG:
         """
         # If a custom model is provided in param, temporarily update global config
         global_config = asdict(self)
+        # Save original query for vector search
+        param.original_query = query
 
-        if param.mode in ["local", "global", "hybrid"]:
+        if param.mode in ["local", "global", "hybrid", "mix"]:
             response = await kg_query(
                 query.strip(),
                 self.chunk_entity_relation_graph,
@@ -1436,30 +1448,17 @@ class LightRAG:
                 self.text_chunks,
                 param,
                 global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
+                hashing_kv=self.llm_response_cache,
                 system_prompt=system_prompt,
+                chunks_vdb=self.chunks_vdb,
             )
         elif param.mode == "naive":
             response = await naive_query(
                 query.strip(),
                 self.chunks_vdb,
-                self.text_chunks,
                 param,
                 global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
-                system_prompt=system_prompt,
-            )
-        elif param.mode == "mix":
-            response = await mix_kg_vector_query(
-                query.strip(),
-                self.chunk_entity_relation_graph,
-                self.entities_vdb,
-                self.relationships_vdb,
-                self.chunks_vdb,
-                self.text_chunks,
-                param,
-                global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
+                hashing_kv=self.llm_response_cache,
                 system_prompt=system_prompt,
             )
         elif param.mode == "bypass":
@@ -1480,6 +1479,7 @@ class LightRAG:
         await self._query_done()
         return response
 
+    # TODO: Deprecated, use user_prompt in QueryParam instead
     def query_with_separate_keyword_extraction(
         self, query: str, prompt: str, param: QueryParam = QueryParam()
     ):
@@ -1501,6 +1501,7 @@ class LightRAG:
             self.aquery_with_separate_keyword_extraction(query, prompt, param)
         )
 
+    # TODO: Deprecated, use user_prompt in QueryParam instead
     async def aquery_with_separate_keyword_extraction(
         self, query: str, prompt: str, param: QueryParam = QueryParam()
     ) -> str | AsyncIterator[str]:

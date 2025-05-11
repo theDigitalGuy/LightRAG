@@ -55,7 +55,7 @@ class PostgreSQLDB:
         self.password = config.get("password", None)
         self.database = config.get("database", "postgres")
         self.workspace = config.get("workspace", "default")
-        self.max = 12
+        self.max = int(config.get("max_connections", 12))
         self.increment = 1
         self.pool: Pool | None = None
 
@@ -311,6 +311,10 @@ class ClientManager:
             "workspace": os.environ.get(
                 "POSTGRES_WORKSPACE",
                 config.get("postgres", "workspace", fallback="default"),
+            ),
+            "max_connections": os.environ.get(
+                "POSTGRES_MAX_CONNECTIONS",
+                config.get("postgres", "max_connections", fallback=12),
             ),
         }
 
@@ -2297,8 +2301,8 @@ TABLES = {
                     doc_name VARCHAR(1024),
                     content TEXT,
                     meta JSONB,
-                    create_time TIMESTAMP(0)
-                    update_time TIMESTAMP(0)
+                    create_time TIMESTAMP(0),
+                    update_time TIMESTAMP(0),
 	                CONSTRAINT LIGHTRAG_DOC_FULL_PK PRIMARY KEY (workspace, id)
                     )"""
     },

@@ -17,6 +17,43 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from lightrag.prompt import PROMPTS
 from dotenv import load_dotenv
+from lightrag.constants import (
+    DEFAULT_LOG_MAX_BYTES,
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_FILENAME,
+)
+
+
+def get_env_value(
+    env_key: str, default: any, value_type: type = str, special_none: bool = False
+) -> any:
+    """
+    Get value from environment variable with type conversion
+
+    Args:
+        env_key (str): Environment variable key
+        default (any): Default value if env variable is not set
+        value_type (type): Type to convert the value to
+        special_none (bool): If True, return None when value is "None"
+
+    Returns:
+        any: Converted value from environment or default
+    """
+    value = os.getenv(env_key)
+    if value is None:
+        return default
+
+    # Handle special case for "None" string
+    if special_none and value == "None":
+        return None
+
+    if value_type is bool:
+        return value.lower() in ("true", "1", "yes", "t", "on")
+    try:
+        return value_type(value)
+    except (ValueError, TypeError):
+        return default
+
 
 # Use TYPE_CHECKING to avoid circular imports
 if TYPE_CHECKING:
@@ -152,14 +189,16 @@ def setup_logger(
         # Get log file path
         if log_file_path is None:
             log_dir = os.getenv("LOG_DIR", os.getcwd())
-            log_file_path = os.path.abspath(os.path.join(log_dir, "lightrag.log"))
+            log_file_path = os.path.abspath(os.path.join(log_dir, DEFAULT_LOG_FILENAME))
 
         # Ensure log directory exists
         os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
 
         # Get log file max size and backup count from environment variables
-        log_max_bytes = int(os.getenv("LOG_MAX_BYTES", 10485760))  # Default 10MB
-        log_backup_count = int(os.getenv("LOG_BACKUP_COUNT", 5))  # Default 5 backups
+        log_max_bytes = get_env_value("LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES, int)
+        log_backup_count = get_env_value(
+            "LOG_BACKUP_COUNT", DEFAULT_LOG_BACKUP_COUNT, int
+        )
 
         try:
             # Add file handler
@@ -711,26 +750,6 @@ def truncate_list_by_token_size(
     return list_data
 
 
-def list_of_list_to_json(data: list[list[str]]) -> list[dict[str, str]]:
-    if not data or len(data) <= 1:
-        return []
-
-    header = data[0]
-    result = []
-
-    for row in data[1:]:
-        if len(row) >= 2:
-            item = {}
-            for i, field_name in enumerate(header):
-                if i < len(row):
-                    item[field_name] = str(row[i])
-                else:
-                    item[field_name] = ""
-            result.append(item)
-
-    return result
-
-
 def save_data_to_file(data, file_name):
     with open(file_name, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
@@ -796,21 +815,33 @@ def xml_to_json(xml_file):
         return None
 
 
-def process_combine_contexts(
-    hl_context: list[dict[str, str]], ll_context: list[dict[str, str]]
-):
+def process_combine_contexts(*context_lists):
+    """
+    Combine multiple context lists and remove duplicate content
+
+    Args:
+        *context_lists: Any number of context lists
+
+    Returns:
+        Combined context list with duplicates removed
+    """
     seen_content = {}
     combined_data = []
 
-    for item in hl_context + ll_context:
-        content_dict = {k: v for k, v in item.items() if k != "id"}
-        content_key = tuple(sorted(content_dict.items()))
-        if content_key not in seen_content:
-            seen_content[content_key] = item
-            combined_data.append(item)
+    # Iterate through all input context lists
+    for context_list in context_lists:
+        if not context_list:  # Skip empty lists
+            continue
+        for item in context_list:
+            content_dict = {k: v for k, v in item.items() if k != "id"}
+            content_key = tuple(sorted(content_dict.items()))
+            if content_key not in seen_content:
+                seen_content[content_key] = item
+                combined_data.append(item)
 
+    # Reassign IDs
     for i, item in enumerate(combined_data):
-        item["id"] = str(i)
+        item["id"] = str(i + 1)
 
     return combined_data
 
@@ -1660,6 +1691,9 @@ def normalize_extracted_info(name: str, is_entity=False) -> str:
     3. Preserve spaces within English text and numbers
     4. Replace Chinese parentheses with English parentheses
     5. Replace Chinese dash with English dash
+    6. Remove English quotation marks from the beginning and end of the text
+    7. Remove English quotation marks in and around chinese
+    8. Remove Chinese quotation marks
 
     Args:
         name: Entity name to normalize
